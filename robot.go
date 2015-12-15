@@ -1,15 +1,18 @@
 package main
 
 import (
+	"log"
 	"strings"
 
 	"golang.org/x/net/websocket"
+	"golang.org/x/time/rate"
 )
 
 type Robot struct {
 	Id            string
 	Conn          *websocket.Conn
 	CommandPrefix string
+	postLimiter   *rate.Limiter
 }
 
 func NewRobot(commandPrefix, token string) (*Robot, error) {
@@ -17,7 +20,14 @@ func NewRobot(commandPrefix, token string) (*Robot, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Robot{id, conn, normalizeDirective(commandPrefix)}, nil
+	r := Robot{
+		id,
+		conn,
+		normalizeDirective(commandPrefix),
+		// 1 / sec with bursts of 50 (see docs; burst is arbitrary)
+		rate.NewLimiter(rate.Limit(1.0), 50),
+	}
+	return &r, nil
 }
 
 func (r *Robot) GetMessage() (Message, error) {
@@ -25,6 +35,11 @@ func (r *Robot) GetMessage() (Message, error) {
 }
 
 func (r *Robot) PostMessage(m Message) error {
+	if !r.postLimiter.Allow() {
+		// This is probably fine for most use cases
+		log.Println("rate limiting message ", m)
+		return nil
+	}
 	return postMessage(r.Conn, m)
 }
 
