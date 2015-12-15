@@ -29,7 +29,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"sync/atomic"
 
@@ -83,15 +82,18 @@ func slackStart(token string) (wsurl, id string, err error) {
 	return
 }
 
+const typeMessage = "message"
+
 // These are the messages read off and written into the websocket. Since this
 // struct serves as both read and write, we include the "Id" field which is
 // required only for writing.
 
 type Message struct {
-	Id      uint64 `json:"id"`
-	Type    string `json:"type"`
-	Channel string `json:"channel"`
-	Text    string `json:"text"`
+	Id   uint64 `json:"id"`
+	Type string `json:"type"`
+	// TODO: add better methods around this
+	Channel interface{} `json:"channel"`
+	Text    string      `json:"text"`
 }
 
 func getMessage(ws *websocket.Conn) (m Message, err error) {
@@ -108,16 +110,15 @@ func postMessage(ws *websocket.Conn, m Message) error {
 
 // Starts a websocket-based Real Time API session and return the websocket
 // and the ID of the (bot-)user whom the token belongs to.
-func slackConnect(token string) (*websocket.Conn, string) {
+func slackConnect(token string) (*websocket.Conn, string, error) {
 	wsurl, id, err := slackStart(token)
 	if err != nil {
-		log.Fatal(err)
+		return nil, "", err
 	}
-
+	// TODO: extract address to flag
 	ws, err := websocket.Dial(wsurl, "", "https://api.slack.com/")
 	if err != nil {
-		log.Fatal(err)
+		return nil, "", err
 	}
-
-	return ws, id
+	return ws, id, nil
 }
