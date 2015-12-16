@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"sort"
 	"strings"
 
 	"golang.org/x/net/websocket"
@@ -13,6 +14,13 @@ type Robot struct {
 	Conn          *websocket.Conn
 	CommandPrefix string
 	postLimiter   *rate.Limiter
+	actions       map[string]Action
+}
+
+type Action struct {
+	Keyword string
+	Desc    string
+	Run     func(*Command) error
 }
 
 func NewRobot(commandPrefix, token string) (*Robot, error) {
@@ -21,12 +29,25 @@ func NewRobot(commandPrefix, token string) (*Robot, error) {
 		return nil, err
 	}
 	r := Robot{
-		id,
-		conn,
-		normalizeDirective(commandPrefix),
+		Id:            id,
+		Conn:          conn,
+		CommandPrefix: normalizeDirective(commandPrefix),
 		// 1 / sec with bursts of 50 (see docs; burst is arbitrary)
-		rate.NewLimiter(rate.Limit(1.0), 50),
+		postLimiter: rate.NewLimiter(rate.Limit(1.0), 50),
 	}
+
+	// TODO: There's definitely a nicer way to define this
+	actions := []Action{
+		Action{"echo", "<text> - reply with <text>", r.echo},
+		Action{"help", "- display all commands", r.help},
+		Action{"love", "- approximate emotion", r.love},
+		Action{"ping", "- reply with pong", r.ping},
+	}
+	r.actions = make(map[string]Action, len(actions))
+	for _, a := range actions {
+		r.actions[normalizeDirective(a.Keyword)] = a
+	}
+
 	return &r, nil
 }
 
@@ -69,18 +90,11 @@ func (r *Robot) ParseCommand(m Message) *Command {
 }
 
 func (r *Robot) RunCommand(c *Command) error {
-	var text string
-	switch c.Command {
-	case "echo":
-		text = c.Args
-	case "love":
-		text = "http://stream1.gifsoup.com/view3/1783565/wall-e-and-eve-o.gif"
-	case "ping":
-		text = "pong"
-	default:
+	if a, ok := r.actions[c.Command]; ok {
+		return a.Run(c)
+	} else {
 		return nil
 	}
-	return r.SendMessage(c.M.Channel, text)
 }
 
 func (r *Robot) SendMessage(channel interface{}, text string) error {
@@ -105,6 +119,37 @@ func (r *Robot) Run() error {
 			return err
 		}
 	}
+}
+
+func (r *Robot) echo(c *Command) error {
+	return r.SendMessage(c.M.Channel, c.Args)
+}
+
+func (r *Robot) help(c *Command) error {
+	keys := make([]string, 0, len(r.actions))
+	for k, _ := range r.actions {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var msg string
+	for i, k := range keys {
+		if i != 0 {
+			msg += "\n"
+		}
+		msg += k + " " + r.actions[k].Desc
+	}
+
+	return r.SendMessage(c.M.Channel, msg)
+}
+
+func (r *Robot) love(c *Command) error {
+	return r.SendMessage(c.M.Channel,
+		"http://stream1.gifsoup.com/view3/1783565/wall-e-and-eve-o.gif")
+}
+
+func (r *Robot) ping(c *Command) error {
+	return r.SendMessage(c.M.Channel, "pong")
 }
 
 func normalizeDirective(s string) string {
